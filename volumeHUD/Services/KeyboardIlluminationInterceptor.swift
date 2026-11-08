@@ -4,35 +4,45 @@
     import Foundation
     import IOKit
 
-    /// Intercepts keyboard illumination media keys, adjusts the built-in keyboard backlight,
-    /// and presents the app's replacement HUD. If the private IOKit property is unavailable or
-    /// cannot be changed, the key is passed through to macOS unchanged.
+    /// Replaces the built-in keyboard illumination HUD when the keyboard backlight can be
+    /// controlled through its IOKit registry property. Unsupported Macs pass the original key on.
     @MainActor
     final class KeyboardIlluminationInterceptor {
         private enum KeyType: Int {
+            // NX_KEYTYPE_ILLUMINATION_UP / NX_KEYTYPE_ILLUMINATION_DOWN.
             case illuminationUp = 21
             case illuminationDown = 22
         }
 
         private static let maximumRawBrightness: Float = 342
+        private static let stepCount: Float = 16
         private static let keyDownState = 0x0A
         private static let systemDefinedEventType: UInt32 = 14
+        private static let keyboardServiceNames = [
+            "AppleHIDKeyboardEventDriverV2",
+            "AppleHIDKeyboardEventDriver",
+        ]
 
-        private weak var hudController: KeyboardBrightnessHUDController?
+        private weak var hudController: HUDController?
         private var eventTap: CFMachPort?
         private var runLoopSource: CFRunLoopSource?
         private var isRunning = false
         private let logger = Logger()
 
-        init(hudController: KeyboardBrightnessHUDController) {
+        init(hudController: HUDController) {
             self.hudController = hudController
         }
 
         deinit {}
 
+        /// Start only when an internal keyboard exposing the backlight property is present.
         @discardableResult
         func start() -> Bool {
             guard !isRunning else { return true }
+            guard Self.readKeyboardBrightness() != nil else {
+                logger.info("No controllable built-in keyboard backlight found; keyboard keys will remain with macOS.")
+                return false
+            }
             guard AXIsProcessTrusted() else {
                 logger.warning("Keyboard illumination interception requires Accessibility permission.")
                 return false
@@ -98,6 +108,8 @@
             return interceptor.handleEvent(event)
         }
 
+        /// Perform the adjustment synchronously in the tap callback so failed writes can pass
+        /// through to macOS rather than swallowing a key that the app could not handle.
         private nonisolated func handleEvent(_ event: CGEvent) -> Unmanaged<CGEvent>? {
             guard
                 let nsEvent = NSEvent(cgEvent: event),
@@ -120,62 +132,63 @@
             }
 
             Task { @MainActor [weak self] in
-                self?.hudController?.show(brightness: brightness)
+                self?.hudController?.showKeyboardBrightnessHUD(brightness: brightness)
             }
             return nil
         }
 
-        /// Reads and updates the private keyboard-backlight registry property. Returning nil keeps
-        /// the original key event intact, allowing macOS to handle unsupported hardware normally.
-        private nonisolated static func adjustKeyboardBrightness(for keyType: KeyType) -> Float? {
-            let serviceNames = [
-                "AppleHIDKeyboardEventDriverV2",
-                "AppleHIDKeyboardEventDriver",
-                "AppleKeyboard",
-            ]
-
-            var keyboardService: io_service_t = 0
-            for serviceName in serviceNames {
-                if let matching = IOServiceMatching(serviceName) {
-                    keyboardService = IOServiceGetMatchingService(kIOMainPortDefault, matching)
+        private nonisolated static func readKeyboardBrightness() -> (service: io_service_t, raw: Float)? {
+            for serviceName in keyboardServiceNames {
+                guard let matching = IOServiceMatching(serviceName) else { continue }
+                let service = IOServiceGetMatchingService(kIOMainPortDefault, matching)
+                guard service != 0 else { continue }
+                if let property = IORegistryEntryCreateCFProperty(
+                    service,
+                    "KeyboardBacklightBrightness" as CFString,
+                    kCFAllocatorDefault,
+                    0,
+                )?.takeRetainedValue() as? NSNumber {
+                    let raw = property.floatValue
+                    guard raw.isFinite, raw >= 0, raw <= maximumRawBrightness else {
+                        IOObjectRelease(service)
+                        return nil
+                    }
+                    return (service, raw)
                 }
-                if keyboardService != 0 { break }
+                IOObjectRelease(service)
             }
-            guard keyboardService != 0 else { return nil }
-            defer { IOObjectRelease(keyboardService) }
+            return nil
+        }
 
-            let propertyKey = "KeyboardBacklightBrightness" as CFString
-            guard let property = IORegistryEntryCreateCFProperty(
-                keyboardService,
-                propertyKey,
-                kCFAllocatorDefault,
-                0,
-            )?.takeRetainedValue() as? NSNumber else {
-                return nil
-            }
+        private nonisolated static func adjustKeyboardBrightness(for keyType: KeyType) -> Float? {
+            guard let (service, currentRawValue) = readKeyboardBrightness() else { return nil }
+            defer { IOObjectRelease(service) }
 
-            let currentRawValue = property.floatValue
-            guard currentRawValue.isFinite, currentRawValue >= 0, currentRawValue <= maximumRawBrightness else {
-                return nil
-            }
-
-            let delta = maximumRawBrightness / 16
+            let step = maximumRawBrightness / stepCount
             let requestedRawValue: Float
             switch keyType {
             case .illuminationUp:
-                requestedRawValue = min(maximumRawBrightness, currentRawValue + delta)
+                requestedRawValue = min(maximumRawBrightness, (round(currentRawValue / step) + 1) * step)
             case .illuminationDown:
-                requestedRawValue = max(0, currentRawValue - delta)
+                requestedRawValue = max(0, (round(currentRawValue / step) - 1) * step)
             }
 
-            let newValue = NSNumber(value: requestedRawValue)
-            guard IORegistryEntrySetCFProperty(keyboardService, propertyKey, newValue) == KERN_SUCCESS,
-                  let readback = IORegistryEntryCreateCFProperty(
-                      keyboardService,
-                      propertyKey,
-                      kCFAllocatorDefault,
-                      0,
-                  )?.takeRetainedValue() as? NSNumber else {
+            let atBoundary = abs(requestedRawValue - currentRawValue) < 0.5
+            if !atBoundary {
+                let status = IORegistryEntrySetCFProperty(
+                    service,
+                    "KeyboardBacklightBrightness" as CFString,
+                    NSNumber(value: requestedRawValue),
+                )
+                guard status == KERN_SUCCESS else { return nil }
+            }
+
+            guard let readback = IORegistryEntryCreateCFProperty(
+                service,
+                "KeyboardBacklightBrightness" as CFString,
+                kCFAllocatorDefault,
+                0,
+            )?.takeRetainedValue() as? NSNumber else {
                 return nil
             }
 
@@ -183,10 +196,9 @@
             guard actualRawValue.isFinite, actualRawValue >= 0, actualRawValue <= maximumRawBrightness else {
                 return nil
             }
-            let didChange = abs(actualRawValue - currentRawValue) > 0.5
-            let isAtRequestedBoundary = requestedRawValue == currentRawValue
-            guard didChange || isAtRequestedBoundary else { return nil }
-
+            if !atBoundary, abs(actualRawValue - currentRawValue) < 0.5 {
+                return nil
+            }
             return min(1, max(0, actualRawValue / maximumRawBrightness))
         }
     }
