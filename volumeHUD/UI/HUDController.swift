@@ -28,6 +28,7 @@ class HUDController: ObservableObject {
     private var lastShownVolume: Float?
     private var lastShownMuted: Bool?
     private var lastShownBrightness: Float?
+    private var lastShownKeyboardBrightness: Float?
     private var lastShownHUDType: HUDType?
     private var isObservingDisplayChanges = false
     private let isPreviewMode: Bool
@@ -45,6 +46,8 @@ class HUDController: ObservableObject {
             displayHUD(hudType: hudType, value: lastShownVolume ?? 0, isMuted: lastShownMuted ?? false)
         case .brightness:
             displayHUD(hudType: hudType, value: lastShownBrightness ?? 0, isMuted: false)
+        case .keyboardBrightness:
+            displayHUD(hudType: hudType, value: lastShownKeyboardBrightness ?? 0, isMuted: false)
         }
     }
 
@@ -62,6 +65,15 @@ class HUDController: ObservableObject {
                 return
             }
             displayHUD(hudType: .brightness, value: brightness, isMuted: false)
+        }
+
+        @MainActor
+        func showKeyboardBrightnessHUD(brightness: Float) {
+            guard UserDefaults.standard.bool(forKey: "keyboardBrightnessEnabled") else {
+                logger.debug("Keyboard brightness HUD disabled; skipping display.")
+                return
+            }
+            displayHUD(hudType: .keyboardBrightness, value: brightness, isMuted: false)
         }
     #endif // !SANDBOX
 
@@ -130,15 +142,15 @@ class HUDController: ObservableObject {
         let style = HUDStyle.current
         let windowSize = NSSize(width: style.windowSize, height: style.windowSize)
 
-        // Brightness HUD always shows on built-in display (since that's what it controls). Volume
-        // HUD respects user preference for display location.
+        // Built-in-display HUDs always appear on the built-in display. Volume respects the user's
+        // display-location preference.
         let targetScreen: NSScreen
         let selectionReason: String
         #if !SANDBOX
-            if hudType == .brightness {
+            if hudType == .brightness || hudType == .keyboardBrightness {
                 if let builtin = getBuiltinScreen() {
                     targetScreen = builtin
-                    selectionReason = "brightness builtin"
+                    selectionReason = "built-in display"
                 } else if let main = NSScreen.main {
                     targetScreen = main
                     selectionReason = "brightness builtin-missing fallback NSScreen.main"
@@ -297,6 +309,12 @@ class HUDController: ObservableObject {
                         || lastShownHUDType != hudType
                         || lastShownBrightness == nil
                         || abs((lastShownBrightness ?? -1) - value) > 0.0005
+
+                case .keyboardBrightness:
+                    hostingView == nil
+                        || lastShownHUDType != hudType
+                        || lastShownKeyboardBrightness == nil
+                        || abs((lastShownKeyboardBrightness ?? -1) - value) > 0.0005
                 }
 
             // If nothing changed and the window is already visible, just extend the timer
@@ -389,6 +407,8 @@ class HUDController: ObservableObject {
 
         case .brightness:
             lastShownBrightness = value
+        case .keyboardBrightness:
+            lastShownKeyboardBrightness = value
         }
     }
 

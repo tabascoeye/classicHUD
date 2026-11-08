@@ -28,6 +28,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency UNUserNotifi
     #if !SANDBOX
         var brightnessMonitor: BrightnessMonitor!
         var mediaKeyInterceptor: MediaKeyInterceptor?
+        var keyboardIlluminationInterceptor: KeyboardIlluminationInterceptor?
     #endif // !SANDBOX
     var hudController: HUDController!
     let loginItemManager: LoginItemManager = .init()
@@ -39,6 +40,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency UNUserNotifi
         /// Check to see if brightness is enabled
         private var isBrightnessEnabled: Bool {
             UserDefaults.standard.bool(forKey: "brightnessEnabled")
+        }
+
+        private var isKeyboardBrightnessEnabled: Bool {
+            UserDefaults.standard.bool(forKey: "keyboardBrightnessEnabled")
         }
     #endif // !SANDBOX
 
@@ -74,6 +79,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency UNUserNotifi
                 onBrightnessChange: { [weak self] in
                     #if !SANDBOX
                         self?.startBrightnessMonitoringIfEnabled()
+                    #endif
+                },
+                onKeyboardBrightnessChange: { [weak self] in
+                    #if !SANDBOX
+                        self?.updateKeyboardIlluminationInterception()
                     #endif
                 },
                 onQuit: { [weak self] in self?.gracefulTerminate() },
@@ -148,6 +158,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency UNUserNotifi
 
             // Start media key interceptor to hide system HUDs
             startMediaKeyInterceptor()
+
+            // Replace macOS's keyboard illumination HUD where supported
+            updateKeyboardIlluminationInterception()
         #endif // !SANDBOX
 
         // Start monitoring display configuration changes
@@ -195,6 +208,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency UNUserNotifi
             } else {
                 logger.warning("Failed to start media key interceptor. Accessibility permissions may be required.")
             }
+        }
+
+        @MainActor
+        func updateKeyboardIlluminationInterception() {
+            guard isKeyboardBrightnessEnabled else {
+                keyboardIlluminationInterceptor?.stop()
+                keyboardIlluminationInterceptor = nil
+                return
+            }
+            if keyboardIlluminationInterceptor == nil {
+                keyboardIlluminationInterceptor = KeyboardIlluminationInterceptor(hudController: hudController)
+            }
+            _ = keyboardIlluminationInterceptor?.start()
         }
     #endif // !SANDBOX
 
@@ -368,6 +394,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency UNUserNotifi
             // Update both monitors' accessibility status centrally
             brightnessMonitor.updateAccessibilityStatus()
             volumeMonitor.updateAccessibilityStatus()
+            updateKeyboardIlluminationInterception()
         }
     #endif // !SANDBOX
 
@@ -424,6 +451,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, @preconcurrency UNUserNotifi
         #if !SANDBOX
             if isBrightnessEnabled { brightnessMonitor?.stopMonitoring() }
             mediaKeyInterceptor?.stop()
+            keyboardIlluminationInterceptor?.stop()
         #endif // !SANDBOX
         hudController?.stopDisplayChangeMonitoring()
 

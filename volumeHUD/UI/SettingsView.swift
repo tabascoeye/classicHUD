@@ -20,6 +20,7 @@ struct SettingsView: View {
     let loginItemManager: LoginItemManager
     let onStyleChange: () -> Void
     let onBrightnessChange: () -> Void
+    let onKeyboardBrightnessChange: () -> Void
     let onQuit: () -> Void
 
     var body: some View {
@@ -38,6 +39,7 @@ struct SettingsView: View {
                     }
                     #if !SANDBOX
                         BrightnessSetting(onChange: onBrightnessChange)
+                        KeyboardBrightnessSetting(onChange: onKeyboardBrightnessChange)
                     #endif
                 }
                 AppearanceSection(
@@ -115,9 +117,27 @@ private struct LoginItemSetting: View {
         let onChange: () -> Void
 
         var body: some View {
-            SettingsRow(description: "Show HUD for brightness changes (experimental; built-in display only)") {
+            SettingsRow(description: "Show HUD for display brightness changes (built-in display only)") {
                 Toggle("Enable Brightness HUD", isOn: $brightnessEnabled)
                     .onChange(of: brightnessEnabled) { onChange() }
+            }
+        }
+    }
+#endif // !SANDBOX
+
+// MARK: - KeyboardBrightnessSetting
+
+#if !SANDBOX
+    private struct KeyboardBrightnessSetting: View {
+        @AppStorage("keyboardBrightnessEnabled") private var keyboardBrightnessEnabled = false
+
+        let onChange: () -> Void
+
+        var body: some View {
+            SettingsRow(description: "Show the classic HUD for built-in keyboard backlight changes") {
+                Toggle("Enable Keyboard Brightness HUD", isOn: $keyboardBrightnessEnabled)
+                    .onAppear { onChange() }
+                    .onChange(of: keyboardBrightnessEnabled) { onChange() }
             }
         }
     }
@@ -220,6 +240,7 @@ struct SettingsRow<Content: View>: View {
         loginItemManager: LoginItemManager(),
         onStyleChange: {},
         onBrightnessChange: {},
+        onKeyboardBrightnessChange: {},
         onQuit: {},
     )
 }

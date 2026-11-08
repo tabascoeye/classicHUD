@@ -12,7 +12,7 @@ With macOS Tahoe, Apple revamped Control Center and replaced the classic volume 
 
 So I did what any sane person would do: I picked up Xcode and wrote my first ever Mac app to bring back the classic macOS HUDs we all know and love. They do what any good system indicator should do: they show you your changes and then go away. And get this—you can actually *see them*. A groundbreaking feature post-2025.
 
-volumeHUD also supports brightness on built-in displays (though it is **off by default**—it is *volumeHUD*, after all), and hides the system HUD by intercepting volume and brightness keys and handling the changes itself rather than letting the OS do it.
+volumeHUD also supports display and keyboard backlight brightness on built-in hardware (though brightness is **off by default**—it is *volumeHUD*, after all), and hides the system HUD by intercepting volume, display brightness, and keyboard illumination keys and handling the changes itself rather than letting the OS do it.
 
 Version 4.0 features a redesigned glass UI that feels right at home on modern macOS without forgetting its roots as the original volume HUD we're all here for.
 
@@ -43,6 +43,7 @@ I worked hard to ensure the app could function without requiring any permissions
   - The system HUD will still appear alongside volumeHUD.
   - The HUD won't appear if you go below 0% or above 100% since it can't use key presses to determine if levels should have changed.
   - Brightness checks may be less reliable since key timing can't be used to check whether a change is user-initiated.
+  - Keyboard backlight interception requires Accessibility permission; without it, macOS handles keyboard illumination keys normally.
 
 Apart from that, all other features should work.
 

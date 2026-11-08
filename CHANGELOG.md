@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog], and this project adheres to [Semantic
 
 ## [Unreleased]
 
+### Added
+
+- Adds an optional keyboard backlight HUD that replaces macOS's keyboard illumination indicator on supported built-in keyboards.
+
 ## [4.0.1] (2026-11-04)
 
 ### Changed

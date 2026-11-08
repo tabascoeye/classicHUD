@@ -33,6 +33,7 @@
 			membershipExceptions = (
 				Assets.xcassets,
 				Services/BrightnessMonitor.swift,
+				Services/KeyboardIlluminationInterceptor.swift,
 				Services/MediaKeyInterceptor.swift,
 			);
 			target = 30DAC6CB2EEE1F73004F96CE /* volumeHUD (Sandbox) */;

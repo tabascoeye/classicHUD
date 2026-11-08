@@ -37,6 +37,8 @@ struct HUDIconView: View {
 
         case .brightness:
             "sun.max"
+        case .keyboardBrightness:
+            "keyboard.badge.ellipsis"
         }
     }
 
